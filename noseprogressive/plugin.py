@@ -159,15 +159,34 @@ class ProgressivePlugin(Plugin):
             Maybe return a Suite or something, or mutate the one passed in.
 
             """
-            from unittest import TestSuite
             from nose.suite import ContextSuite
+
             bucketer = Bucketer()
-            import pdb;pdb.set_trace()
             process_tests(suite, bucketer.add)
 
+            # Lay the bundles of common-fixture-having test classes end to end
+            # in a single list so we can make a test suite out of them:
             flattened = []
-            for fixture_bundle in bucketer.buckets.itervalues():
-                # XXX: Figure out to stick the advice attrs on, and stick them on.
+            for (key, fixture_bundle) in bucketer.buckets.iteritems():
+                # Advise first and last test classes in each bundle to set up
+                # and tear down fixtures and the rest not to:
+                if key:  # Ones with fixtures are sure to be classes, which
+                         # means they're sure to be ContextSuites with
+                         # contexts.
+                    # First class with this set of fixtures sets up:
+                    fixture_bundle[0].context._fg_should_setup_fixtures = True
+
+                    # Set all classes' 1..n should_setup to False:
+                    for cls in fixture_bundle[1:]:
+                        cls.context._fg_should_setup_fixtures = False
+
+                    # Last class tears down:
+                    fixture_bundle[-1].context._fg_should_teardown_fixtures = True
+
+                    # Set all classes' 0..(n-1) should_teardown to False:
+                    for cls in fixture_bundle[:-1]:
+                        cls.context._fg_should_teardown_fixtures = False
+
                 flattened.extend(fixture_bundle)
 
             return ContextSuite(flattened)
