@@ -117,42 +117,59 @@ class ProgressivePlugin(Plugin):
         self.bar = result.bar
 
     def prepareTest(self, test):
-        """Reorder the tests in the suite so classes using identical sets of fixtures are contiguous."""
+        """Reorder the tests in the suite so classes using identical sets of
+        fixtures are contiguous."""
         def process_tests(suite, base_callable):
-            """Given a nested disaster of LazySuites, traverse to the leaves (Tests) and do something to them."""
-            try:
-                # suite._tests = [t for t in suite._tests]  # concretize all the iterators so we can then order the tests or whatever
-                suite._tests
-            except AttributeError:
-                # We hit a Test or something, so do the thing.
+            """Given a nested disaster of [Lazy]Suites, traverse to the first
+            level that has setup or teardown routines, and do something to them.
+
+            If we were to traverse all the way to the leaves (the Tests)
+            indiscriminately and return them, when the runner later calls them,
+            they'd run without reference to the suite that contained them, so
+            they'd miss their class-, module-, and package-wide setup and
+            teardown routines.
+
+            The nested suites form basically a double-linked tree, and suites
+            will call up to their containing suites to run their setups and
+            teardowns, but it would be hubris to assume that something you saw
+            fit to setup or teardown at the module level is less costly to
+            repeat than DB fixtures. Also, those sorts of setups and teardowns
+            are extremely rare in our code. Thus, we limit the granularity of
+            bucketing to the first level that has setups or teardowns.
+
+            """
+            if not hasattr(suite, '_tests') or suite.hasFixtures():
+                # We hit a Test or something with setup, so do the thing.
                 base_callable(suite)
             else:
                 for t in suite._tests:
                     process_tests(t, base_callable)
-        
+
         class Bucketer(object):
             def __init__(self):
-                self.buckets = {}  # {frozenset(['users.json']): [Test(...), Test(...)]} 
-        
+                self.buckets = {}  # {frozenset(['users.json']): [Test(...), Test(...)]}
+
             def add(self, test):
                 fixtures = frozenset(getattr(test.context, 'fixtures', []))
                 self.buckets.setdefault(fixtures, []).append(test)
-        
+
         def suite_sorted_by_fixtures(suite):
             """Bucket Tests in a Suite by the ``fixtures`` member of their context.
-            
+
             Maybe return a Suite or something, or mutate the one passed in.
-            
+
             """
             from unittest import TestSuite
+            from nose.suite import ContextSuite
             bucketer = Bucketer()
             import pdb;pdb.set_trace()
             process_tests(suite, bucketer.add)
 
             flattened = []
-            for group in bucketer.buckets.itervalues():
-                flattened.extend(group)
-            
-            return TestSuite(flattened)
-        
+            for fixture_bundle in bucketer.buckets.itervalues():
+                # XXX: Figure out to stick the advice attrs on, and stick them on.
+                flattened.extend(fixture_bundle)
+
+            return ContextSuite(flattened)
+
         return suite_sorted_by_fixtures(test)
