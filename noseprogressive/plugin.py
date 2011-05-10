@@ -115,3 +115,44 @@ class ProgressivePlugin(Plugin):
     def prepareTestResult(self, result):
         """Hang onto the progress bar so the StreamWrappers can grab it."""
         self.bar = result.bar
+
+    def prepareTest(self, test):
+        """Reorder the tests in the suite so classes using identical sets of fixtures are contiguous."""
+        def process_tests(suite, base_callable):
+            """Given a nested disaster of LazySuites, traverse to the leaves (Tests) and do something to them."""
+            try:
+                # suite._tests = [t for t in suite._tests]  # concretize all the iterators so we can then order the tests or whatever
+                suite._tests
+            except AttributeError:
+                # We hit a Test or something, so do the thing.
+                base_callable(suite)
+            else:
+                for t in suite._tests:
+                    process_tests(t, base_callable)
+        
+        class Bucketer(object):
+            def __init__(self):
+                self.buckets = {}  # {frozenset(['users.json']): [Test(...), Test(...)]} 
+        
+            def add(self, test):
+                fixtures = frozenset(getattr(test.context, 'fixtures', []))
+                self.buckets.setdefault(fixtures, []).append(test)
+        
+        def suite_sorted_by_fixtures(suite):
+            """Bucket Tests in a Suite by the ``fixtures`` member of their context.
+            
+            Maybe return a Suite or something, or mutate the one passed in.
+            
+            """
+            from unittest import TestSuite
+            bucketer = Bucketer()
+            import pdb;pdb.set_trace()
+            process_tests(suite, bucketer.add)
+
+            flattened = []
+            for group in bucketer.buckets.itervalues():
+                flattened.extend(group)
+            
+            return TestSuite(flattened)
+        
+        return suite_sorted_by_fixtures(test)
