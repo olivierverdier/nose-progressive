@@ -121,7 +121,8 @@ class ProgressivePlugin(Plugin):
         fixtures are contiguous."""
         def process_tests(suite, base_callable):
             """Given a nested disaster of [Lazy]Suites, traverse to the first
-            level that has setup or teardown routines, and do something to them.
+            level that has setup or teardown routines, and do something to
+            them.
 
             If we were to traverse all the way to the leaves (the Tests)
             indiscriminately and return them, when the runner later calls them,
@@ -138,7 +139,7 @@ class ProgressivePlugin(Plugin):
             bucketing to the first level that has setups or teardowns.
 
             """
-            if not hasattr(suite, '_tests') or suite.hasFixtures():
+            if not hasattr(suite, '_tests') or (hasattr(suite, 'hasFixtures') and suite.hasFixtures()):
                 # We hit a Test or something with setup, so do the thing.
                 base_callable(suite)
             else:
@@ -147,16 +148,23 @@ class ProgressivePlugin(Plugin):
 
         class Bucketer(object):
             def __init__(self):
-                self.buckets = {}  # {frozenset(['users.json']): [Test(...), Test(...)]}
+                # { frozenset(['users.json']):
+                #      [ContextSuite(...), ContextSuite(...)] }
+                self.buckets = {}
 
             def add(self, test):
                 fixtures = frozenset(getattr(test.context, 'fixtures', []))
                 self.buckets.setdefault(fixtures, []).append(test)
 
         def suite_sorted_by_fixtures(suite):
-            """Bucket Tests in a Suite by the ``fixtures`` member of their context.
+            """Flatten and sort a tree of Suites by the ``fixtures`` members of
+            their contexts.
+            
+            Add ``_fg_should_setup_fixtures`` and
+            ``_fg_should_teardown_fixtures`` attrs to each test class to advise
+            it whether to set up or tear down (respectively) the fixtures.
 
-            Maybe return a Suite or something, or mutate the one passed in.
+            Return a Suite.
 
             """
             from nose.suite import ContextSuite
